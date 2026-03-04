@@ -255,7 +255,7 @@ def train(args):
         lr=args.lr, weight_decay=0.01
     )
     scheduler  = ReduceLROnPlateau(optimizer, mode="max", factor=0.5,
-                                   patience=3, verbose=True)
+                                   patience=3)
     scaler     = torch.cuda.amp.GradScaler(enabled=(DEVICE == "cuda"))
     early_stop = EarlyStopping(patience=args.patience)
 

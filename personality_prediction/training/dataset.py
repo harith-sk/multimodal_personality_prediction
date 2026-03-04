@@ -35,6 +35,13 @@ TRAIT_KEYS = [
     "neuroticism",
 ]
 
+# ── Annotation file names per split ──────────────────────────────────────────
+ANNOTATION_FILES = {
+    "train": "annotation_training.pkl",
+    "val":   "annotation_validation.pkl",
+    "test":  "annotation_test.pkl",
+}
+
 # ChaLearn V2 may use 'val', 'validate', or 'validation' as the split folder name
 SPLIT_DIR_CANDIDATES = {
     "train": ["train"],
