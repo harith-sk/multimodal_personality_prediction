@@ -35,12 +35,35 @@ TRAIT_KEYS = [
     "neuroticism",
 ]
 
-# ── Annotation file names per split ──────────────────────────────────────────
-ANNOTATION_FILES = {
-    "train": "annotation_training.pkl",
-    "val":   "annotation_validation.pkl",
-    "test":  "annotation_test.pkl",
+# ChaLearn V2 may use 'val', 'validate', or 'validation' as the split folder name
+SPLIT_DIR_CANDIDATES = {
+    "train": ["train"],
+    "val":   ["val", "validate", "validation"],
+    "test":  ["test"],
 }
+
+
+def _resolve_ann_file(data_root: Path, split: str) -> Path:
+    """
+    Find the annotation pickle regardless of folder naming conventions.
+    Search order:
+      1. data_root/<split_folder>/annotation_<split>.pkl
+      2. data_root/annotation_<split>.pkl  (flat layout)
+    """
+    ann_name = ANNOTATION_FILES[split]
+    for candidate in SPLIT_DIR_CANDIDATES.get(split, [split]):
+        p = data_root / candidate / ann_name
+        if p.exists():
+            return p
+    # Flat fallback
+    p = data_root / ann_name
+    if p.exists():
+        return p
+    raise FileNotFoundError(
+        f"Annotation file '{ann_name}' not found for split '{split}'.\n"
+        f"Searched under: {data_root}\n"
+        f"Tried folders : {SPLIT_DIR_CANDIDATES.get(split, [split])} + root"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,12 +98,7 @@ class PersonalityDataset(Dataset):
         self.data_root  = Path(data_root)
 
         # ── Load annotations ──────────────────────────────────────────────────
-        ann_file = self.data_root / split / ANNOTATION_FILES[split]
-        if not ann_file.exists():
-            raise FileNotFoundError(
-                f"Annotation file not found: {ann_file}\n"
-                f"Expected layout: data/{split}/{ANNOTATION_FILES[split]}"
-            )
+        ann_file = _resolve_ann_file(self.data_root, split)
 
         with open(ann_file, "rb") as f:
             annotations = pickle.load(f, encoding="latin1")

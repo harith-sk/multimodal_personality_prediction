@@ -56,6 +56,14 @@ ANNOTATION_FILES = {
     "test":  "annotation_test.pkl",
 }
 
+# ChaLearn V2: splits may be named 'val' OR 'validate' on disk
+# Maps canonical name → possible actual folder names to try
+SPLIT_DIR_CANDIDATES = {
+    "train": ["train"],
+    "val":   ["val", "validate", "validation"],
+    "test":  ["test"],
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 def extract_audio_features(video_path: Path) -> np.ndarray:
@@ -177,26 +185,92 @@ def extract_visual_features(video_path: Path) -> np.ndarray:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+def _find_split_dir(data_root: Path, split: str) -> Path:
+    """
+    Resolve the actual folder name for a split on disk.
+    ChaLearn V2 may use 'val', 'validate', or 'validation'.
+    """
+    for candidate in SPLIT_DIR_CANDIDATES.get(split, [split]):
+        p = data_root / candidate
+        if p.exists():
+            return p
+    raise FileNotFoundError(
+        f"Cannot find split folder for '{split}' under {data_root}. "
+        f"Tried: {SPLIT_DIR_CANDIDATES.get(split, [split])}"
+    )
+
+
+def _build_video_index(split_dir: Path, split: str) -> dict:
+    """
+    Build a dict {video_stem: full_path} by scanning ALL subfolders.
+
+    ChaLearn V2 structure:
+      train/ → train_1/ ... train_6/  (6 subfolders, ~1000 videos each)
+      val/   → val_1/ val_2/          (2 subfolders)
+      test/  → test_1/ test_2/        (2 subfolders)
+
+    Also handles flat structure (all videos directly in split_dir/videos/
+    or directly in split_dir) as a fallback.
+    """
+    index = {}
+
+    # 1. Look for numbered subfolders: train_1, train_2, val_1, etc.
+    numbered = sorted(split_dir.glob(f"{split}_*/"))
+
+    # Also accept generic subfolder names (e.g. 'videos/', 'clips/')
+    if not numbered:
+        numbered = [p for p in split_dir.iterdir() if p.is_dir()]
+
+    if numbered:
+        for subfolder in numbered:
+            for mp4 in subfolder.glob("*.mp4"):
+                index[mp4.stem] = mp4
+        if index:
+            logger.info(f"  Found {len(index)} videos across {len(numbered)} subfolders")
+            return index
+
+    # 2. Fallback: videos directly in split_dir
+    for mp4 in split_dir.glob("*.mp4"):
+        index[mp4.stem] = mp4
+
+    if index:
+        logger.info(f"  Found {len(index)} videos directly in {split_dir.name}/")
+
+    return index
+
+
 def process_split(split: str, data_root: Path, cache_dir: Path):
     """Process all videos in one split and save .pt cache files."""
 
-    video_dir  = data_root / split / "videos"
-    ann_file   = data_root / split / ANNOTATION_FILES[split]
+    split_dir   = _find_split_dir(data_root, split)
+    ann_file    = split_dir / ANNOTATION_FILES[split]
     split_cache = cache_dir / split
     split_cache.mkdir(parents=True, exist_ok=True)
 
-    # Load annotation to get the official list of video filenames
+    # Load annotation to get official list + labels
     if not ann_file.exists():
-        raise FileNotFoundError(f"Annotation file not found: {ann_file}")
+        # Some releases put annotation outside the split folder
+        ann_file = data_root / ANNOTATION_FILES[split]
+    if not ann_file.exists():
+        raise FileNotFoundError(
+            f"Annotation file not found.\n"
+            f"  Tried: {split_dir / ANNOTATION_FILES[split]}\n"
+            f"  Tried: {data_root / ANNOTATION_FILES[split]}"
+        )
 
     with open(ann_file, "rb") as f:
         annotations = pickle.load(f, encoding="latin1")
+
+    # Build a fast stem→path lookup across all video subfolders
+    video_index = _build_video_index(split_dir, split)
 
     video_names = list(annotations.keys())
     total       = len(video_names)
 
     logger.info(f"\n{'='*60}")
-    logger.info(f"Split: {split}  |  {total} videos  |  Cache: {split_cache}")
+    logger.info(f"Split : {split}  |  Folder: {split_dir.name}")
+    logger.info(f"Labels: {total}  |  Videos on disk: {len(video_index)}")
+    logger.info(f"Cache : {split_cache}")
     logger.info(f"{'='*60}")
 
     done = skipped = failed = 0
@@ -210,9 +284,10 @@ def process_split(split: str, data_root: Path, cache_dir: Path):
             skipped += 1
             continue
 
-        video_path = video_dir / video_name
-        if not video_path.exists():
-            logger.warning(f"Video not found: {video_path}")
+        # Look up video path using index (handles multi-subfolder layout)
+        video_path = video_index.get(stem)
+        if video_path is None:
+            logger.warning(f"Video not found in index: {video_name}")
             failed += 1
             continue
 
