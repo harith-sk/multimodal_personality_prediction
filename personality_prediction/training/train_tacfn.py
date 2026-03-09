@@ -105,9 +105,20 @@ def freeze_projections(model: TACFN):
 
 def unfreeze_all(model: TACFN, optimizer: optim.Optimizer, lr: float):
     """
-    Phase 2: Unfreeze all layers for end-to-end fine-tuning.
-    Adds previously frozen projection parameters back to the optimizer.
+    Phase 2: Unfreeze projection layers with a lower LR than the fusion layers.
+
+    Differential LR rationale:
+      - Fusion + regressor have been training since Phase 1 — they are already
+        partially converged.  Keep their LR unchanged.
+      - Projection layers were frozen the whole of Phase 1 — they have never
+        seen a gradient.  Starting them at the same LR as an already-warmed-up
+        fusion would cause large, destabilising updates in the first few steps.
+      - Using proj_lr = 0.4 × base_lr is the standard "layer-wise LR decay"
+        pattern and keeps the newly-unfrozen layers from disrupting the
+        converged fusion weights.
     """
+    proj_lr = lr * 0.4          # e.g. 5e-5 base → 2e-5 for projections
+
     frozen_params = []
     for proj in [model.audio_proj, model.text_proj, model.visual_proj]:
         for param in proj.parameters():
@@ -118,9 +129,13 @@ def unfreeze_all(model: TACFN, optimizer: optim.Optimizer, lr: float):
     if frozen_params:
         optimizer.add_param_group({
             "params":       frozen_params,
-            "lr":           lr,
+            "lr":           proj_lr,
             "weight_decay": 0.01,
         })
+        logger.info(
+            f"Phase 2: Projection LR = {proj_lr:.2e}  "
+            f"(0.4× base {lr:.2e}) — differential LR applied"
+        )
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Phase 2: ALL layers UNFROZEN — {trainable:,} trainable parameters")
