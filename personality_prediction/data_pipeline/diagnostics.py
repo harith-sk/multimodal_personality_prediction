@@ -41,6 +41,30 @@ ANNOTATION_FILES = {
 }
 EXPECTED_DIMS = {"audio": 768, "text": 768, "visual": 2048}
 
+_TRAIT_KEYS_SET = {
+    "openness", "conscientiousness", "extraversion",
+    "agreeableness", "neuroticism", "interview",
+}
+
+
+def _normalise_annotations(raw: dict) -> dict:
+    """Converts trait-keyed {trait:{file:score}} to file-keyed {file:{trait:score}}."""
+    if not raw:
+        return raw
+    first_key = next(iter(raw))
+    if first_key.lower() in _TRAIT_KEYS_SET:
+        normalised = {}
+        for trait, file_scores in raw.items():
+            if not isinstance(file_scores, dict):
+                continue
+            for fname, score in file_scores.items():
+                if fname not in normalised:
+                    normalised[fname] = {}
+                normalised[fname][trait] = float(score)
+        return normalised
+    return raw
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 def check_split(split: str, data_root: Path, cache_dir: Path) -> dict:
@@ -55,7 +79,8 @@ def check_split(split: str, data_root: Path, cache_dir: Path) -> dict:
         return results
 
     with open(ann_file, "rb") as f:
-        annotations = pickle.load(f, encoding="latin1")
+        raw_annotations = pickle.load(f, encoding="latin1")
+    annotations    = _normalise_annotations(raw_annotations)
     expected_count = len(annotations)
 
     # ── 2. Cache completeness ─────────────────────────────────────────────────
@@ -105,6 +130,12 @@ def check_split(split: str, data_root: Path, cache_dir: Path) -> dict:
     # ── 4. Report per-modality ────────────────────────────────────────────────
     results["modality_checks"] = {}
     for mod in EXPECTED_DIMS:
+        if sample_size == 0:
+            results["modality_checks"][mod] = {
+                "dim_errors": 0, "nan_rate": "N/A",
+                "zero_rate": "N/A", "mean_std": "N/A",
+            }
+            continue
         nan_rate  = nan_counts[mod]  / sample_size * 100
         zero_rate = zero_counts[mod] / sample_size * 100
         mean_std  = float(np.mean(stds[mod])) if stds[mod] else 0.0
@@ -142,7 +173,8 @@ def plot_label_distributions(data_root: Path, out_dir: Path):
         return
 
     with open(ann_file, "rb") as f:
-        annotations = pickle.load(f, encoding="latin1")
+        raw_annotations = pickle.load(f, encoding="latin1")
+    annotations = _normalise_annotations(raw_annotations)
 
     all_labels = []
     for trait_dict in annotations.values():

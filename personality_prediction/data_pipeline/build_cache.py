@@ -239,6 +239,52 @@ def _build_video_index(split_dir: Path, split: str) -> dict:
     return index
 
 
+TRAIT_KEYS_SET = {
+    "openness", "conscientiousness", "extraversion",
+    "agreeableness", "neuroticism", "interview",
+}
+
+
+def _normalise_annotations(raw: dict) -> dict:
+    """
+    ChaLearn V2 .pkl files come in two layouts:
+
+    Layout A — file-keyed (what the code originally expected):
+        { 'video001.mp4': {'openness': 0.5, 'extraversion': 0.6, ...}, ... }
+
+    Layout B — trait-keyed (what the training PC dataset actually has):
+        { 'openness': {'video001.mp4': 0.5, ...}, 'extraversion': {...}, ... }
+
+    This function detects which layout is in use and normalises it to Layout A.
+    """
+    if not raw:
+        return raw
+
+    first_key = next(iter(raw))
+
+    # Layout B: top-level keys are trait names
+    if first_key.lower() in TRAIT_KEYS_SET:
+        logger.info(
+            "Detected trait-keyed annotation format (Layout B) — converting to file-keyed."
+        )
+        normalised = {}
+        for trait, file_scores in raw.items():
+            if not isinstance(file_scores, dict):
+                continue
+            for fname, score in file_scores.items():
+                if fname not in normalised:
+                    normalised[fname] = {}
+                normalised[fname][trait] = float(score)
+        logger.info(
+            f"  Converted {len(normalised)} video entries from {len(raw)} trait keys."
+        )
+        return normalised
+
+    # Layout A: already file-keyed — return as-is
+    logger.info("Detected file-keyed annotation format (Layout A) — no conversion needed.")
+    return raw
+
+
 def process_split(split: str, data_root: Path, cache_dir: Path):
     """Process all videos in one split and save .pt cache files."""
 
@@ -259,13 +305,17 @@ def process_split(split: str, data_root: Path, cache_dir: Path):
         )
 
     with open(ann_file, "rb") as f:
-        annotations = pickle.load(f, encoding="latin1")
+        raw_annotations = pickle.load(f, encoding="latin1")
+
+    # Normalise to {filename: {trait: score}} regardless of source format
+    annotations = _normalise_annotations(raw_annotations)
 
     # Build a fast stem→path lookup across all video subfolders
     video_index = _build_video_index(split_dir, split)
 
     video_names = list(annotations.keys())
     total       = len(video_names)
+
 
     logger.info(f"\n{'='*60}")
     logger.info(f"Split : {split}  |  Folder: {split_dir.name}")

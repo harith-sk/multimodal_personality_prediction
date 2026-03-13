@@ -42,6 +42,35 @@ ANNOTATION_FILES = {
     "test":  "annotation_test.pkl",
 }
 
+_TRAIT_KEYS_SET = {
+    "openness", "conscientiousness", "extraversion",
+    "agreeableness", "neuroticism", "interview",
+}
+
+
+def _normalise_annotations(raw: dict) -> dict:
+    """
+    Handles two ChaLearn V2 annotation .pkl layouts:
+    Layout A (file-keyed): {filename: {trait: score}}
+    Layout B (trait-keyed): {trait: {filename: score}}
+    Always returns Layout A.
+    """
+    if not raw:
+        return raw
+    first_key = next(iter(raw))
+    if first_key.lower() in _TRAIT_KEYS_SET:
+        normalised = {}
+        for trait, file_scores in raw.items():
+            if not isinstance(file_scores, dict):
+                continue
+            for fname, score in file_scores.items():
+                if fname not in normalised:
+                    normalised[fname] = {}
+                normalised[fname][trait] = float(score)
+        return normalised
+    return raw
+
+
 # ChaLearn V2 may use 'val', 'validate', or 'validation' as the split folder name
 SPLIT_DIR_CANDIDATES = {
     "train": ["train"],
@@ -108,7 +137,8 @@ class PersonalityDataset(Dataset):
         ann_file = _resolve_ann_file(self.data_root, split)
 
         with open(ann_file, "rb") as f:
-            annotations = pickle.load(f, encoding="latin1")
+            raw_annotations = pickle.load(f, encoding="latin1")
+        annotations = _normalise_annotations(raw_annotations)
 
         # ── Build sample list: (video_name_stem, label_tensor) ───────────────
         # annotation keys are video filenames like '0021.mp4'
