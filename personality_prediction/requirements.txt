@@ -2,8 +2,8 @@
 # Install separately first:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-# ── HuggingFace
-transformers>=4.40.0
+# ── HuggingFace  (transformers<4.41 — 4.41+ requires torch>=2.6 not yet on all clusters)
+transformers>=4.40.0,<4.41
 tokenizers>=0.19.1
 
 # ── Whisper  (version unpinned — old pin 20231117 breaks with modern setuptools)
@@ -18,8 +18,8 @@ opencv-python>=4.9.0.80
 Pillow>=10.3.0
 timm>=1.0.3
 
-# ── Data science  (pandas<2.2 avoids deprecations in our DataFrame usage)
-numpy>=1.26.0
+# ── Data science  (numpy<2 — numpy 2.x breaks pandas; pandas<2.2 avoids deprecations)
+numpy>=1.26.0,<2
 pandas>=1.5.0,<2.2.0
 scikit-learn>=1.4.0
 
