@@ -3,12 +3,11 @@
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # ── HuggingFace
-transformers==4.40.0
-tokenizers==0.19.1
-accelerate==0.30.0
+transformers>=4.40.0
+tokenizers>=0.19.1
 
-# ── Whisper
-openai-whisper==20231117
+# ── Whisper  (version unpinned — old pin 20231117 breaks with modern setuptools)
+openai-whisper
 
 # ── Audio
 soundfile>=0.12.1
@@ -19,9 +18,9 @@ opencv-python>=4.9.0.80
 Pillow>=10.3.0
 timm>=1.0.3
 
-# ── Data science
+# ── Data science  (pandas<2.2 avoids deprecations in our DataFrame usage)
 numpy>=1.26.0
-pandas>=2.2.0
+pandas>=1.5.0,<2.2.0
 scikit-learn>=1.4.0
 
 # ── Plotting
