@@ -71,23 +71,23 @@ class VisualEncoder:
             logger.warning("No frames provided — returning zero vector")
             return np.zeros(2048, dtype=np.float32)
 
-        embeddings = []
+        tensors = []
         for frame in frames:
             if frame is None:
                 continue
-            # Ensure uint8 RGB numpy array
             if frame.dtype != np.uint8:
                 frame = (frame * 255).astype(np.uint8)
+            tensors.append(self.transform(frame))
 
-            x = self.transform(frame).unsqueeze(0).to(self.device)
-            emb = self.model(x)               # (1, 2048)
-            embeddings.append(emb)
-
-        if not embeddings:
+        if not tensors:
             return np.zeros(2048, dtype=np.float32)
 
-        features = torch.mean(torch.stack(embeddings), dim=0)  # (1, 2048)
-        return features.squeeze(0).cpu().numpy()               # (2048,)
+        # Stack all frames into one batch and run a single GPU forward pass
+        batch = torch.stack(tensors).to(self.device)   # (N, 3, 224, 224)
+        with torch.no_grad():
+            embeddings = self.model(batch)             # (N, 2048)
+        features = embeddings.mean(dim=0)              # (2048,)
+        return features.cpu().numpy()                  # (2048,)
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

@@ -74,7 +74,7 @@ class SpeechTextPipeline:
                 temperature=0.0,
                 no_speech_threshold=0.6,
                 compression_ratio_threshold=2.4,
-                verbose=False
+                verbose=None         # None = suppress all output including tqdm bars
             )
 
             # Collect full transcript
