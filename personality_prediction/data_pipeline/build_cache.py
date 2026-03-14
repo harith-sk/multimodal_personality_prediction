@@ -56,6 +56,12 @@ ANNOTATION_FILES = {
     "test":  "annotation_test.pkl",
 }
 
+TRANSCRIPTION_FILES = {
+    "train": "transcription_training.pkl",
+    "val":   "transcription_validation.pkl",
+    "test":  "transcription_test.pkl",
+}
+
 # ChaLearn V2: splits may be named 'val' OR 'validate' on disk
 # Maps canonical name → possible actual folder names to try
 SPLIT_DIR_CANDIDATES = {
@@ -127,14 +133,51 @@ def extract_audio_features(video_path: Path) -> np.ndarray:
             pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-def extract_text_features(video_path: Path):
+def _load_transcriptions(split_dir: Path, data_root: Path, split: str) -> dict:
     """
-    Transcribe video audio with Whisper then encode with RoBERTa.
+    Load pre-computed transcriptions from the dataset if available.
+    Returns {video_stem: transcript_text} or {} if not found.
+
+    ChaLearn V2 format: {filename.mp4: transcript_str}
+    We convert keys to stems for fast lookup.
+    """
+    fname = TRANSCRIPTION_FILES.get(split)
+    if not fname:
+        return {}
+
+    for candidate in [split_dir / fname, data_root / fname]:
+        if candidate.exists():
+            with open(candidate, "rb") as f:
+                raw = pickle.load(f, encoding="latin1")
+            # Convert {filename.mp4: text} → {stem: text}
+            stemmed = {Path(k).stem: v for k, v in raw.items() if isinstance(v, str)}
+            logger.info(
+                f"  Loaded pre-computed transcriptions: {len(stemmed)} entries "
+                f"from {candidate.name} — Whisper will be SKIPPED ✅"
+            )
+            return stemmed
+
+    logger.info("  No transcription pkl found — will run Whisper for each video")
+    return {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+def extract_text_features(video_path: Path, preloaded_text: str = None):
+    """
+    Encode text to RoBERTa features (768,).
+
+    If preloaded_text is given, skips Whisper transcription entirely and
+    encodes the pre-loaded transcript directly with RoBERTa.
     Returns (features np.ndarray (768,), transcript str).
     """
     encoder = get_text_encoder()
     try:
+        if preloaded_text:
+            # Fast path: skip Whisper, encode pre-loaded transcript directly
+            features = encoder.encode_text(preloaded_text)
+            return np.array(features, dtype=np.float32), preloaded_text
+
+        # Slow path: run Whisper transcription
         result = encoder.process(str(video_path))
         features = np.array(result["text_features"], dtype=np.float32)
         transcript = result.get("transcript", "")
@@ -310,6 +353,9 @@ def process_split(split: str, data_root: Path, cache_dir: Path):
     # Normalise to {filename: {trait: score}} regardless of source format
     annotations = _normalise_annotations(raw_annotations)
 
+    # Load pre-computed transcriptions (skips Whisper if found)
+    transcriptions = _load_transcriptions(split_dir, data_root, split)
+
     # Build a fast stem→path lookup across all video subfolders
     video_index = _build_video_index(split_dir, split)
 
@@ -342,8 +388,11 @@ def process_split(split: str, data_root: Path, cache_dir: Path):
             continue
 
         try:
+            # Look up pre-computed transcript for this video (skips Whisper if found)
+            preloaded_text = transcriptions.get(stem)
+
             audio_feat   = extract_audio_features(video_path)
-            text_feat, _ = extract_text_features(video_path)
+            text_feat, _ = extract_text_features(video_path, preloaded_text=preloaded_text)
             visual_feat  = extract_visual_features(video_path)
 
             cache_data = {
