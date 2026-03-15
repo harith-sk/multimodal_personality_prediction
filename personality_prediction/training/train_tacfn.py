@@ -103,7 +103,7 @@ def freeze_projections(model: TACFN):
     logger.info("Phase 1: Projection layers FROZEN — training fusion + regressor only")
 
 
-def unfreeze_all(model: TACFN, optimizer: optim.Optimizer, lr: float):
+def unfreeze_all(model: TACFN, optimizer: optim.Optimizer, lr: float, scheduler=None):
     """
     Phase 2: Unfreeze projection layers with a lower LR than the fusion layers.
 
@@ -132,6 +132,13 @@ def unfreeze_all(model: TACFN, optimizer: optim.Optimizer, lr: float):
             "lr":           proj_lr,
             "weight_decay": 0.01,
         })
+        
+        # PyTorch scheduler bug workaround: ReduceLROnPlateau caches the number
+        # of min_lrs based on param_groups at init time. If we add a param group,
+        # we MUST append a min_lr manually or it crashes with IndexError.
+        if scheduler is not None and hasattr(scheduler, 'min_lrs'):
+            scheduler.min_lrs.append(scheduler.min_lrs[0] if scheduler.min_lrs else 0.0)
+
         logger.info(
             f"Phase 2: Projection LR = {proj_lr:.2e}  "
             f"(0.4× base {lr:.2e}) — differential LR applied"
@@ -283,7 +290,7 @@ def train(args):
         # ── Switch to Phase 2 after warmup ────────────────────────────────────
         if phase == 1 and epoch > args.warmup_epochs:
             phase = 2
-            unfreeze_all(model, optimizer, args.lr)
+            unfreeze_all(model, optimizer, args.lr, scheduler)
             logger.info(f"\n--- Switching to Phase 2 at epoch {epoch} ---\n")
 
         tr = train_epoch(model, train_loader, optimizer, criterion, scaler,
